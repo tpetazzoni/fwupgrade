@@ -30,14 +30,12 @@ int flash_fwpart(const char *mtdpart, const char *data, unsigned int len,
 	FILE *nandwrite_pipe;
 	size_t sz;
 
-#if 0
 	snprintf(cmd, sizeof(cmd), "flash_erase /dev/%s 0 0", mtdpart);
 	ret = system(cmd);
 	if (ret) {
 		snprintf(msg, msglen, "Unable to erase partition %s\n", mtdpart);
 		return -1;
 	}
-#endif
 
 	snprintf(cmd, sizeof(cmd), "nandwrite -p /dev/%s - > /tmp/nandwrite.log 2>&1", mtdpart);
 	nandwrite_pipe = popen(cmd, "w");
