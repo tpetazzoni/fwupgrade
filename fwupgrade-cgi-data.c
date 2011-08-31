@@ -43,45 +43,45 @@ char *cgi_receive_data(unsigned int *length_out)
 	char *content_type;
 	char *content_length;
 	long length, length_read;
-	char *buffer;
-	char *boundary, *boundary_start, *data;
+	char *buffer = NULL;
+	char *boundary = NULL, *boundary_start, *data;
 	unsigned int boundary_len, data_len, remaining;
 
 	method = getenv("REQUEST_METHOD");
 	if (! method) {
-		fprintf(logfile, "no method\n");
-		exit(1);
+		printf("ERROR: incorrect REQUEST_METHOD, aborting.\n");
+		goto error;
 	}
 
 	if (strcasecmp(method, "post")) {
-		fprintf(logfile, "incorrect method %s\n", method);
-		exit(1);
+		printf("ERROR: incorrect HTTP method, aborting.\n");
+		goto error;
 	}
 
 	content_type = getenv("CONTENT_TYPE");
 	if (! content_type) {
-		fprintf(logfile, "no content type\n");
-		exit(1);
+		printf("ERROR: no content type, aborting.\n");
+		goto error;
 	}
 
 	content_length = getenv("CONTENT_LENGTH");
 	if (! content_length) {
-		fprintf(logfile, "no content length\n");
-		exit(1);
+		printf("ERROR: no content length, aborting.\n");
+		goto error;
 	}
 
 	/* Verify that we have a supported content type */
 	if (strncasecmp(content_type, VALID_CONTENT_TYPE,
 			strlen(VALID_CONTENT_TYPE))) {
-		fprintf(logfile, "unsupported content type %s\n",
-			content_type);
-		exit(1);
+		printf("ERROR: unsupported content type %s, aborting.\n",
+		       content_type);
+		goto error;
 	}
 
 	boundary_start = strchr(content_type, '=');
 	if (! boundary_start) {
-		fprintf(logfile, "cannot find boundary delimiter\n");
-		exit(1);
+		printf("ERROR: cannot find boundary delimiter, aborting.\n");
+		goto error;
 	}
 
 	/* Skip the '=' character */
@@ -90,37 +90,37 @@ char *cgi_receive_data(unsigned int *length_out)
 	boundary_len = 2 + strlen(boundary_start);
 	boundary = malloc(boundary_len + 1);
 	if (! boundary) {
-		fprintf(logfile, "memory allocation problem\n");
-		exit(1);
+		printf("ERROR: memory allocation problem, aborting.\n");
+		goto error;
 	}
 
 	snprintf(boundary, boundary_len + 1, "--%s", boundary_start);
 
 	length = strtol(content_length, NULL, 10);
 	if (length == LONG_MIN || length == LONG_MAX) {
-		fprintf(logfile, "incorrect length\n");
-		exit (1);
+		printf("ERROR: incorrect length\n");
+		goto error;
 	}
 
 	buffer = malloc(length);
 	if (! buffer) {
-		fprintf(logfile, "cannot allocate memory\n");
-		exit (1);
+		printf("ERROR: memory allocation problem, aborting.\n");
+		goto error;
 	}
 
 	length_read = fread(buffer, 1, length, stdin);
 	if (length_read != length) {
-		fprintf(logfile, "could not read the complete %ld bytes\n", length);
-		exit (1);
+		printf("ERROR: could not read the complete %ld bytes, aborting.\n", length);
+		goto error;
 	}
 
-	fprintf(logfile, "I have read %ld bytes\n", length);
+	printf("Received a firmware image of %ld bytes\n", length);
 	remaining = length;
 
 	/* The data should start with the boundary delimiter */
 	if (strncmp(boundary, buffer, boundary_len)) {
-		fprintf(logfile, "cannot find boundary delimiter in data\n");
-		exit(1);
+		printf("ERROR: cannot find boundary delimiter in data, aborting.\n");
+		goto error;
 	}
 
 	buffer = nextline(buffer, & remaining);
@@ -128,8 +128,8 @@ char *cgi_receive_data(unsigned int *length_out)
 	/* Check that we have a Content-Disposition line */
 	if (strncmp(buffer, VALID_ELEMENT_CONTENT_DISPOSITION,
 		    strlen(VALID_ELEMENT_CONTENT_DISPOSITION))) {
-		fprintf(logfile, "cannot find Content-Disposition in element\n");
-		exit(1);
+		printf("ERROR: cannot find Content-Disposition in element\n");
+		goto error;
 	}
 
 	buffer = nextline(buffer, & remaining);
@@ -137,8 +137,8 @@ char *cgi_receive_data(unsigned int *length_out)
 	/* Check that we have a Content-Type line */
 	if (strncmp(buffer, VALID_ELEMENT_CONTENT_TYPE,
 		    strlen(VALID_ELEMENT_CONTENT_TYPE))) {
-		fprintf(logfile, "cannot find Content-Type in element\n");
-		exit(1);
+		printf("ERROR: cannot find Content-Type in element\n");
+		goto error;
 	}
 
 	/* Skip all lines until we find an empty line */
@@ -150,8 +150,8 @@ char *cgi_receive_data(unsigned int *length_out)
 	}
 
 	if (buffer == NULL) {
-		fprintf(logfile, "cannot find data\n");
-		exit(1);
+		printf("ERROR: cannot find data in firmware image\n");
+		goto error;
 	}
 
 	/* The real data starts here */
@@ -171,9 +171,13 @@ char *cgi_receive_data(unsigned int *length_out)
 		remaining --;
 	}
 
-	fprintf(logfile, "data length is data_len: %d\n", data_len);
-
 	*length_out = data_len;
-	return data;
-}
+	free(boundary);
 
+	return data;
+
+error:
+	free(buffer);
+	free(boundary);
+	return NULL;
+}

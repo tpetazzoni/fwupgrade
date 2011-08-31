@@ -2,12 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <unistd.h>
+#include <sys/reboot.h>
+#include <linux/reboot.h>
 
 #include "fwupgrade.h"
 #include "fwupgrade-cgi.h"
 #include "fwupgrade-uboot-env.h"
-
-FILE *logfile;
 
 #define THIS_HWID 0x2424
 
@@ -22,45 +23,47 @@ struct fwupgrade_action actions[] = {
 	{ "rootfs", "mtd1", "mtd3" },
 };
 
-int flash_fwpart(const char *mtdpart, const char *data, unsigned int len,
-		 char *msg, int msglen)
+int flash_fwpart(const char *mtdpart, const char *data, unsigned int len)
 {
 	char cmd[1024];
 	int ret;
 	FILE *nandwrite_pipe;
 	size_t sz;
 
-	snprintf(cmd, sizeof(cmd), "flash_erase /dev/%s 0 0", mtdpart);
+	printf("Erasing partition %s\n", mtdpart);
+
+	snprintf(cmd, sizeof(cmd), "flash_erase -q /dev/%s 0 0", mtdpart);
 	ret = system(cmd);
 	if (ret) {
-		snprintf(msg, msglen, "Unable to erase partition %s\n", mtdpart);
+		printf("ERROR: Unable to erase partition %s, aborting.\n", mtdpart);
 		return -1;
 	}
+
+	printf("Flashing partition %s\n", mtdpart);
 
 	snprintf(cmd, sizeof(cmd), "nandwrite -p /dev/%s - > /tmp/nandwrite.log 2>&1", mtdpart);
 	nandwrite_pipe = popen(cmd, "w");
 	if (! nandwrite_pipe) {
-		snprintf(msg, msglen, "Unable to flash partition %s\n", mtdpart);
+		printf("ERROR: Unable to flash partition %s, aborting\n", mtdpart);
 		return -1;
 	}
 
 	sz = fwrite(data, len, 1, nandwrite_pipe);
 	if (sz != 1) {
-		snprintf(msg, msglen, "Unable to flash partition %s\n", mtdpart);
+		printf("ERROR: Unable to flash partition %s, aborting\n", mtdpart);
 		return -1;
 	}
 
 	ret = pclose(nandwrite_pipe);
 	if (! WIFEXITED(ret) || WEXITSTATUS(ret) != 0) {
-		snprintf(msg, msglen, "Unable to flash partition %s %d %m\n", mtdpart, WIFEXITED(ret));
+		printf("ERROR: Unable to flash partition %s, aborting\n", mtdpart);
 		return -1;
 	}
 
 	return 0;
 }
 
-int handle_fwpart(const char *partname, const char *data, unsigned int len,
-		  char *msg, int msglen)
+int handle_fwpart(const char *partname, const char *data, unsigned int len)
 {
 	struct fwupgrade_action *act = NULL;
 	const char *current_mtdpart, *next_mtdpart;
@@ -75,14 +78,14 @@ int handle_fwpart(const char *partname, const char *data, unsigned int len,
 	}
 
 	if (! act) {
-		snprintf(msg, msglen, "Unknown partition '%s' in firmware image", partname);
+		printf("ERROR: Unknown partition '%s' in firmware image, aborting.\n", partname);
 		return -1;
 	}
 
 	snprintf(uboot_varname, sizeof(uboot_varname), "%s_mtdpart", partname);
 	current_mtdpart = fw_env_read(uboot_varname);
 	if (! current_mtdpart) {
-		snprintf(msg, msglen, "Cannot find current MTD partition for '%s'", partname);
+		printf("ERROR: Cannot find current MTD partition for '%s', aborting.\n", partname);
 		return -1;
 	}
 
@@ -93,11 +96,11 @@ int handle_fwpart(const char *partname, const char *data, unsigned int len,
 		next_mtdpart = act->mtd_part1;
 	}
 	else {
-		snprintf(msg, msglen, "Invalid current MTD partition '%s'", current_mtdpart);
+		printf("ERROR: Invalid current MTD partition '%s', aborting.\n", current_mtdpart);
 		return -1;
 	}
 
-	ret = flash_fwpart(next_mtdpart, data, len, msg, msglen);
+	ret = flash_fwpart(next_mtdpart, data, len);
 	if (ret)
 		return ret;
 
@@ -106,20 +109,19 @@ int handle_fwpart(const char *partname, const char *data, unsigned int len,
 	return 0;
 }
 
-int apply_upgrade(const char *data, unsigned int data_length,
-		  char *msg, unsigned int msglen)
+int apply_upgrade(const char *data, unsigned int data_length)
 {
 	int i, ret;
 
 	struct fwheader *header = (struct fwheader *) data;
 
 	if (le32toh(header->magic) != FWUPGRADE_MAGIC) {
-		snprintf(msg, msglen, "Invalid firmware magic");
+		printf("ERROR: Invalid firmware magic, aborting.\n");
 		return -1;
 	}
 
 	if (le32toh(header->hwid) != THIS_HWID) {
-		snprintf(msg, msglen, "Invalid HWID");
+		printf("ERROR: Invalid HWID, aborting.\n");
 		return -1;
 	}
 
@@ -136,14 +138,15 @@ int apply_upgrade(const char *data, unsigned int data_length,
 
 		md5(data + offset, sz, computed_crc);
 		if (memcmp(computed_crc, header->parts[i].crc, FWPART_CRC_SZ)) {
-			snprintf(msg, msglen, "Invalid CRC");
+			printf("ERROR: Invalid CRC in firmware image part %s\n",
+			       header->parts[i].name);
 			return -1;
 		}
 	}
 
 	ret = fw_env_open();
 	if (ret) {
-		snprintf(msg, msglen, "Cannot read the U-Boot environment");
+		printf("ERROR: Cannot read the U-Boot environment, aborting.\n");
 		return -1;
 	}
 
@@ -158,17 +161,14 @@ int apply_upgrade(const char *data, unsigned int data_length,
 
 		offset = le32toh(header->parts[i].offset);
 
-		fprintf(logfile, "Handling part %d\n", i);
-
-		ret = handle_fwpart(header->parts[i].name, data + offset, sz,
-				    msg, msglen);
+		ret = handle_fwpart(header->parts[i].name, data + offset, sz);
 		if (ret)
 			return ret;
 	}
 
 	ret = fw_env_close();
 	if (ret) {
-		snprintf(msg, msglen, "Could not rewrite U-Boot environment");
+		printf("ERROR: Could not rewrite U-Boot environment, aborting\n");
 		return -1;
 	}
 
@@ -178,23 +178,29 @@ int apply_upgrade(const char *data, unsigned int data_length,
 int main(int argc, char *argv[])
 {
 	char *data;
-	char msg[256];
 	unsigned int data_length;
 	int ret;
 
-	logfile = fopen("/tmp/fwupgrade.log", "a+");
-
-	fprintf(stdout, "Content-type: text/html\n\n");
+	printf("Content-type: text/html\n\n");
 
 	data = cgi_receive_data(& data_length);
-
-	ret = apply_upgrade(data, data_length, msg, sizeof(msg));
-	if (ret) {
-		fprintf(stdout, "ERROR: %s", msg);
+	if (! data) {
+		printf("Failed to receive data\n");
+		printf("Upgrade process failed\n");
 		return -1;
 	}
 
-	fprintf(stdout, "Upgrade successful");
+	ret = apply_upgrade(data, data_length);
+	if (ret) {
+		printf("Upgrade process failed\n");
+		free(data);
+		return -1;
+	} else {
+		printf("Upgrade successful, rebooting\n");
+		free(data);
+		close(STDIN_FILENO);
+		reboot(LINUX_REBOOT_CMD_RESTART);
+	}
 
 	return 0;
 }
