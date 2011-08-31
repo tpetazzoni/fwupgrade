@@ -67,3 +67,11 @@ Firmware image file format
       |            |
       |            |
       +------------+
+
+Testing
+=======
+
+To test the firmware upgrade process, it is nice to have this curl
+command around:
+
+curl -F "file=@./firmware.img" http://IPADDR/cgi-bin/fwupgrade-cgi
