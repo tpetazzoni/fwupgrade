@@ -269,11 +269,11 @@ MD5Transform(uint32_t buf[4], uint32_t const in[16])
  * 'input'. 'output' must have enough space to hold 16 bytes.
  */
 void
-md5 (unsigned char *input, int len, unsigned char output[16])
+md5 (const char *input, int len, char output[16])
 {
 	struct MD5Context context;
 
 	MD5Init(&context);
-	MD5Update(&context, input, len);
-	MD5Final(output, &context);
+	MD5Update(&context, (const unsigned char *) input, len);
+	MD5Final((unsigned char *)output, &context);
 }

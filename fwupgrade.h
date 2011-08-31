@@ -1,6 +1,8 @@
 #ifndef FWUPGRADE_H
 #define FWUPGRADE_H
 
+#include <stdint.h>
+
 #define FWPART_NAME_SZ 16
 #define FWPART_CRC_SZ  16
 
@@ -38,6 +40,6 @@ struct fwheader {
 	char          unused[1012];
 };
 
-void md5 (unsigned char *input, int len, unsigned char output[16]);
+void md5 (const char *input, int len, char output[16]);
 
 #endif /* FWUPGRADE_H */

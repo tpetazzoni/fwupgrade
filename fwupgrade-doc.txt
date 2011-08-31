@@ -1,7 +1,42 @@
 Firmware upgrade
 ================
 
-The format of a firmware upgrade file is as follows :
+This software is composed of two applications :
+
+ * fwupgrade-tool, which is an utility compiled for the host machine,
+   that allows to generate and inspect a firmware image
+
+ * fwupgrade-cgi, which is a cgi-bin executable, typically compiled
+   for the target machine, that receives the firmware image and
+   flashes the various parts of the firmware image in the right MTD
+   partitions and updates the U-Boot environment accordingly
+
+The firmware image contains a set of "parts", each identified by a
+name. The fwupgrade-cgi program contains a configuration telling where
+a given part should be flashed. For each part, two MTD partitions are
+specified, so that the updates are not done by overwriting the
+currently running kernel or the currently mounted filesystems. The
+fwupgrade-cgi looks at the U-Boot environment for variables named
+<partname>_mtdpart to know where the current version of the part is
+being stored.
+
+For exemple, if a part is named "rootfs" and the fwupgrade-cgi program
+has the configuration that the "rootfs" part is on mtd2 or mtd3, then:
+
+ * If the rootfs_mtdpart U-Boot variable says 'mtd2', the new image is
+   flashed on mtd3 and the U-Boot variable rootfs_mtdpart is changed
+   to 'mtd3'
+
+ * If the rootfs_mtdpart U-Boot variable says 'mtd3', the new image is
+   flashed on mtd2 and the U-Boot variable rootfs_mtdpart is changed
+   to 'mtd2'
+
+Of course, the U-Boot environnement is supposed to be configured so
+that the rootfs_mtdpart is used to tell the kernel where the current
+root filesystem is.
+
+Firmware image file format
+==========================
 
       +------------+  ---------------------------  +--------------+
       |   header   |                               |    magic     |

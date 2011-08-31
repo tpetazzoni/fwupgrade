@@ -66,6 +66,13 @@ int dodumpfile(const char *filename)
 	return 0;
 }
 
+void help(void)
+{
+	printf("fwupgrade-tool, create and dump firmware images\n");
+	printf(" image creation: fwupgrade-tool -o output-file -p part1name:part1file -p part2name:part2file -i HWID\n");
+	printf(" image dump    : fwupgrade-tool -d image-file\n");
+}
+
 int main(int argc, char *argv[])
 {
 	int opt;
@@ -92,9 +99,12 @@ int main(int argc, char *argv[])
 
 	/* Analyze the options. We fill the "hwid" variable and the
 	   "parts" array. */
-	while ((opt = getopt(argc, argv, "h:p:o:d:v")) != -1) {
+	while ((opt = getopt(argc, argv, "hi:p:o:d:v")) != -1) {
 		switch(opt) {
 		case 'h':
+			help();
+			exit(0);
+		case 'i':
 			hwid = strtol(optarg, NULL, 16);
 			break;
 
@@ -127,16 +137,19 @@ int main(int argc, char *argv[])
 
 	if (part_count == 0) {
 		fprintf(stderr, "No parts given, aborting\n");
+		help();
 		exit(1);
 	}
 
 	if (hwid == 0) {
 		fprintf(stderr, "No HWID given, aborting\n");
+		help();
 		exit(1);
 	}
 
 	if (! output) {
 		fprintf(stderr, "No output file given, aborting\n");
+		help();
 		exit(1);
 	}
 
@@ -153,7 +166,6 @@ int main(int argc, char *argv[])
 	for (i = 0; i < part_count; i++) {
 		struct stat s;
 		int fd;
-		unsigned int mapping_size;
 		char *filename, *tmp;
 		int name_len;
 
@@ -230,4 +242,6 @@ int main(int argc, char *argv[])
 		fwrite(parts_addrs[i], 1, header.parts[i].length, outfile);
 	}
 	fclose(outfile);
+
+	return 0;
 }
