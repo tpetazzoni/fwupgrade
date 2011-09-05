@@ -6,7 +6,7 @@
 #include "fwupgrade-cgi.h"
 
 #define VALID_CONTENT_TYPE "multipart/form-data; boundary="
-#define VALID_ELEMENT_CONTENT_DISPOSITION "Content-Disposition: form-data"
+#define VALID_ELEMENT_CONTENT_DISPOSITION "Content-Disposition:"
 #define VALID_ELEMENT_CONTENT_TYPE "Content-Type: application/octet-stream"
 
 static char *nextline(char *s, unsigned int *remaining)
@@ -37,6 +37,66 @@ static char *nextline(char *s, unsigned int *remaining)
 	return s;
 }
 
+char *get_filename_from_content_disposition(char *buf)
+{
+	char *p, *psave;
+	char *localbuf, *tmp;
+	int buflen;
+
+	/* Eliminate the Content-Disposition header name */
+	buf += strlen(VALID_ELEMENT_CONTENT_DISPOSITION);
+
+	/* Copy the header value so that it is 0 terminated, which
+	 * allows it to be parsed with strtok_r() */
+	buflen = strchr(buf, '\r') - buf;
+	localbuf = malloc(buflen + 1);
+	if (! localbuf)
+		return NULL;
+	memset(localbuf, 0, buflen + 1);
+	strncpy(localbuf, buf, buflen);
+
+	tmp = localbuf;
+
+	/* This parses a string like 'form-data; name="file";
+	 * filename="foobar.img"' and extracts 'foobar.img' */
+	while((p = strtok_r(tmp, ";", &psave)) != NULL) {
+		char *delim;
+
+		/* Eliminate spaces before the field name */
+		while (*p == ' ')
+			p++;
+
+		/* Split the name from the value */
+		delim = strchr(p, '=');
+		if (! delim)
+			goto next;
+		else {
+			int len; char *value; char *name;
+			name = p;
+			*delim = '\0';
+			value = delim + 1;
+			len = strlen(value);
+
+			/* Remove quotes */
+			if (value[0] == '"' && value[len-1] == '"') {
+				value[len-1] = '\0';
+				value++;
+			}
+
+			if (! strcmp(name, "filename")) {
+				free(localbuf);
+				return strdup(value);
+			}
+		}
+
+	next:
+		tmp = NULL;
+	}
+
+	free(localbuf);
+	return NULL;
+}
+
 char *cgi_receive_data(unsigned int *length_out)
 {
 	char *method;
@@ -44,8 +104,10 @@ char *cgi_receive_data(unsigned int *length_out)
 	char *content_length;
 	long length, length_read;
 	char *buffer = NULL;
-	char *boundary = NULL, *boundary_start, *data;
+	char *boundary = NULL, *boundary_start, *data, *cur;
 	unsigned int boundary_len, data_len, remaining;
+	int boundary_found;
+	char *filename;
 
 	method = getenv("REQUEST_METHOD");
 	if (! method) {
@@ -114,67 +176,83 @@ char *cgi_receive_data(unsigned int *length_out)
 		goto error;
 	}
 
-	printf("Received a firmware image of %ld bytes\n", length);
 	remaining = length;
+	cur       = buffer;
 
 	/* The data should start with the boundary delimiter */
-	if (strncmp(boundary, buffer, boundary_len)) {
+	if (strncmp(boundary, cur, boundary_len)) {
 		printf("ERROR: cannot find boundary delimiter in data, aborting.\n");
 		goto error;
 	}
 
-	buffer = nextline(buffer, & remaining);
+	cur = nextline(cur, & remaining);
 
 	/* Check that we have a Content-Disposition line */
-	if (strncmp(buffer, VALID_ELEMENT_CONTENT_DISPOSITION,
+	if (strncmp(cur, VALID_ELEMENT_CONTENT_DISPOSITION,
 		    strlen(VALID_ELEMENT_CONTENT_DISPOSITION))) {
 		printf("ERROR: cannot find Content-Disposition in element\n");
 		goto error;
 	}
 
-	buffer = nextline(buffer, & remaining);
+	filename = get_filename_from_content_disposition(cur);
+
+	cur = nextline(cur, & remaining);
 
 	/* Check that we have a Content-Type line */
-	if (strncmp(buffer, VALID_ELEMENT_CONTENT_TYPE,
+	if (strncmp(cur, VALID_ELEMENT_CONTENT_TYPE,
 		    strlen(VALID_ELEMENT_CONTENT_TYPE))) {
 		printf("ERROR: cannot find Content-Type in element\n");
 		goto error;
 	}
 
 	/* Skip all lines until we find an empty line */
-	while((buffer = nextline(buffer, & remaining)) != NULL) {
-		if (buffer[0] == '\r' && buffer[1] == '\n') {
-			buffer = nextline(buffer, & remaining);
+	while((cur = nextline(cur, & remaining)) != NULL) {
+		if (cur[0] == '\r' && cur[1] == '\n') {
+			cur = nextline(cur, & remaining);
 			break;
 		}
 	}
 
-	if (buffer == NULL) {
+	if (cur == NULL) {
 		printf("ERROR: cannot find data in firmware image\n");
 		goto error;
 	}
 
 	/* The real data starts here */
-	data = buffer;
+	data = cur;
 
-	while(remaining) {
+	data_len = 0;
+	boundary_found = 0;
+	while(remaining >= boundary_len) {
 		/* Have we reached the boundary, which marks the end
 		   of the data ? */
-		if (! strncmp(buffer, boundary, boundary_len)) {
+		if (! strncmp(cur, boundary, boundary_len)) {
 			if (! strncmp(data + data_len - 2, "\r\n", 2))
 				data_len -= 2;
+			boundary_found = 1;
 			break;
 		}
 
 		data_len ++;
-		buffer   ++;
+		cur      ++;
 		remaining --;
 	}
 
+	if (! boundary_found) {
+		printf("ERROR: cannot find boundary\n");
+		goto error;
+	}
+
+	printf("Received image file '%s' of %d bytes\n",
+	       filename, data_len);
+
+	/* Move the useful data at the beginning of the buffer, so
+	   that the beginning of the data is 4 bytes aligned */
+	memmove(buffer, data, data_len);
 	*length_out = data_len;
 	free(boundary);
 
-	return data;
+	return buffer;
 
 error:
 	free(buffer);

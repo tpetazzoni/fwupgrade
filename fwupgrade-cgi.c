@@ -41,7 +41,7 @@ int flash_fwpart(const char *mtdpart, const char *data, unsigned int len)
 
 	printf("Flashing partition %s\n", mtdpart);
 
-	snprintf(cmd, sizeof(cmd), "nandwrite -p /dev/%s - > /tmp/nandwrite.log 2>&1", mtdpart);
+	snprintf(cmd, sizeof(cmd), "nandwrite -q -p /dev/%s -", mtdpart);
 	nandwrite_pipe = popen(cmd, "w");
 	if (! nandwrite_pipe) {
 		printf("ERROR: Unable to flash partition %s, aborting\n", mtdpart);
@@ -112,7 +112,6 @@ int handle_fwpart(const char *partname, const char *data, unsigned int len)
 int apply_upgrade(const char *data, unsigned int data_length)
 {
 	int i, ret;
-
 	struct fwheader *header = (struct fwheader *) data;
 
 	if (le32toh(header->magic) != FWUPGRADE_MAGIC) {
@@ -133,6 +132,8 @@ int apply_upgrade(const char *data, unsigned int data_length)
 		sz = le32toh(header->parts[i].length);
 		if (! sz)
 			continue;
+
+		printf("Checking part %s\n", header->parts[i].name);
 
 		offset = le32toh(header->parts[i].offset);
 
@@ -159,6 +160,8 @@ int apply_upgrade(const char *data, unsigned int data_length)
 		if (! sz)
 			continue;
 
+		printf("Applying part %s\n", header->parts[i].name);
+
 		offset = le32toh(header->parts[i].offset);
 
 		ret = handle_fwpart(header->parts[i].name, data + offset, sz);
@@ -181,24 +184,26 @@ int main(int argc, char *argv[])
 	unsigned int data_length;
 	int ret;
 
-	printf("Content-type: text/html\n\n");
+	/* Switch to line-oriented buffering for stdout so that
+	 * messages are sent to the HTTP client right away */
+	setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
+
+	printf("Content-type: text/plain\n\n");
 
 	data = cgi_receive_data(& data_length);
 	if (! data) {
 		printf("Failed to receive data\n");
-		printf("Upgrade process failed\n");
 		return -1;
 	}
 
 	ret = apply_upgrade(data, data_length);
 	if (ret) {
 		printf("Upgrade process failed\n");
-		free(data);
+		close(STDOUT_FILENO);
 		return -1;
 	} else {
 		printf("Upgrade successful, rebooting\n");
-		free(data);
-		close(STDIN_FILENO);
+		close(STDOUT_FILENO);
 		reboot(LINUX_REBOOT_CMD_RESTART);
 	}
 
