@@ -257,7 +257,9 @@ int main(int argc, char *argv[])
 		return -1;
 	} else {
 		printf("Upgrade successful, rebooting\n");
+		fflush(stdout);
 		close(STDOUT_FILENO);
+		sleep(1);
 		reboot(LINUX_REBOOT_CMD_RESTART);
 	}
 
