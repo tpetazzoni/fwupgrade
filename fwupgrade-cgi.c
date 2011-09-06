@@ -214,7 +214,6 @@ int parse_configuration(void)
 				actions[action].mtd_part1 = strdup(cur);
 			else if (field == FIELD_MTD_PART2)
 				actions[action].mtd_part2 = strdup(cur);
-			printf("%s\n", cur);
 			field++;
 			tmp = NULL;
 		}
