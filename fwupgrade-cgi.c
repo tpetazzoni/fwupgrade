@@ -18,10 +18,7 @@ struct fwupgrade_action {
 	const char *mtd_part2;
 };
 
-struct fwupgrade_action actions[] = {
-	{ "kernel", "mtd0", "mtd2" },
-	{ "rootfs", "mtd1", "mtd3" },
-};
+struct fwupgrade_action actions[FWPART_COUNT];
 
 int flash_fwpart(const char *mtdpart, const char *data, unsigned int len)
 {
@@ -70,7 +67,10 @@ int handle_fwpart(const char *partname, const char *data, unsigned int len)
 	char uboot_varname[64];
 	int i, ret;
 
-	for (i = 0; i < (sizeof(actions) / sizeof(actions[0])); i++) {
+	for (i = 0; i < FWPART_COUNT; i++) {
+		if (actions[i].part_name == NULL)
+			break;
+
 		if (! strcmp(actions[i].part_name, partname)) {
 			act = & actions[i];
 			break;
@@ -96,7 +96,8 @@ int handle_fwpart(const char *partname, const char *data, unsigned int len)
 		next_mtdpart = act->mtd_part1;
 	}
 	else {
-		printf("ERROR: Invalid current MTD partition '%s', aborting.\n", current_mtdpart);
+		printf("ERROR: Invalid current MTD partition '%s' for %s, aborting.\n",
+		       current_mtdpart, act->part_name);
 		return -1;
 	}
 
@@ -178,6 +179,54 @@ int apply_upgrade(const char *data, unsigned int data_length)
 	return 0;
 }
 
+int parse_configuration(void)
+{
+	char line[255];
+	int action = 0;
+
+	FILE *cfg = fopen("/etc/fwupgrade.conf", "r");
+	if (! cfg)
+		return -1;
+
+	memset(actions, 0, sizeof(actions));
+
+	while (fgets(line, sizeof(line), cfg)) {
+		char *tmp, *cur;
+		enum { FIELD_PART_NAME,
+		       FIELD_MTD_PART1,
+		       FIELD_MTD_PART2 } field = FIELD_PART_NAME;
+
+		if (action >= FWPART_COUNT) {
+			fclose(cfg);
+			return -1;
+		}
+
+		/* Remove ending newline if any */
+		if (line[strlen(line)-1] == '\n')
+			line[strlen(line)-1] = '\0';
+
+		/* Split the three ':' separated fields */
+		tmp = line;
+		while((cur = strtok(tmp, ":")) != NULL) {
+			if (field == FIELD_PART_NAME)
+				actions[action].part_name = strdup(cur);
+			else if (field == FIELD_MTD_PART1)
+				actions[action].mtd_part1 = strdup(cur);
+			else if (field == FIELD_MTD_PART2)
+				actions[action].mtd_part2 = strdup(cur);
+			printf("%s\n", cur);
+			field++;
+			tmp = NULL;
+		}
+
+		action++;
+	}
+
+	fclose(cfg);
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	char *data;
@@ -189,6 +238,12 @@ int main(int argc, char *argv[])
 	setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
 
 	printf("Content-type: text/plain\n\n");
+
+	ret = parse_configuration();
+	if (ret < 0) {
+		printf("Problem parsing configuration\n");
+		return -1;
+	}
 
 	data = cgi_receive_data(& data_length);
 	if (! data) {
