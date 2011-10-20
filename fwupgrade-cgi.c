@@ -252,11 +252,11 @@ int main(int argc, char *argv[])
 
 	ret = apply_upgrade(data, data_length);
 	if (ret) {
-		printf("Upgrade process failed\n");
+		printf("The system upgrade failed\n");
 		close(STDOUT_FILENO);
 		return -1;
 	} else {
-		printf("Upgrade successful, rebooting\n");
+		printf("The system upgrade completed successfully\n");
 		fflush(stdout);
 		close(STDOUT_FILENO);
 		sleep(1);
