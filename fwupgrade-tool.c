@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <string.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -9,7 +10,10 @@
 
 #include "fwupgrade.h"
 
-int dodumpfile(const char *filename)
+#define MODE_DUMP     0x42
+#define MODE_EXTRACT  0x43
+
+int dump_or_extract_file(const char *filename, int mode)
 {
 	void *addr;
 	struct stat s;
@@ -42,8 +46,11 @@ int dodumpfile(const char *filename)
 		return -1;
 	}
 
-	printf("HWID    : 0x%x\n", le32toh(header->hwid));
-	printf("Flags   : 0x%x\n", le32toh(header->flags));
+	if (mode == MODE_DUMP) {
+		printf("HWID    : 0x%x\n", le32toh(header->hwid));
+		printf("Flags   : 0x%x\n", le32toh(header->flags));
+	}
+
 	for (i = 0; i < FWPART_COUNT; i++) {
 		unsigned int sz, offset;
 		char computed_crc[FWPART_CRC_SZ];
@@ -59,8 +66,39 @@ int dodumpfile(const char *filename)
 			return -1;
 		}
 
-		printf("part[%d] : name=%s, size=%d, offset=%d\n",
-		       i, header->parts[i].name, sz, offset);
+		if (mode == MODE_DUMP) {
+			printf("part[%d] : name=%s, size=%d, offset=%d\n",
+			       i, header->parts[i].name, sz, offset);
+		}
+		else if (mode == MODE_EXTRACT) {
+			char *extracted_file_name;
+			FILE *extracted_file;
+
+			if (asprintf(& extracted_file_name, "extracted-%s.img",
+				     header->parts[i].name) < 0)
+			{
+				fprintf(stderr, "Cannot allocate memory\n");
+				exit(1);
+			}
+
+			extracted_file = fopen(extracted_file_name, "w+");
+			if (! extracted_file) {
+				fprintf(stderr, "Cannot open output file %s\n",
+					extracted_file_name);
+				free(extracted_file_name);
+				exit(1);
+			}
+
+			if (fwrite(addr + offset, sz, 1, extracted_file) != 1) {
+				fprintf(stderr, "Cannot write output file %s\n",
+					extracted_file_name);
+				free(extracted_file_name);
+				exit(1);
+			}
+
+			fclose(extracted_file);
+			free(extracted_file_name);
+		}
 	}
 
 	return 0;
@@ -71,6 +109,7 @@ void help(void)
 	printf("fwupgrade-tool, create and dump firmware images\n");
 	printf(" image creation: fwupgrade-tool -o output-file -p part1name:part1file -p part2name:part2file -i HWID\n");
 	printf(" image dump    : fwupgrade-tool -d image-file\n");
+	printf(" image extract : fwupgrade-tool -x image-file\n");
 }
 
 int main(int argc, char *argv[])
@@ -90,6 +129,7 @@ int main(int argc, char *argv[])
 
 	char *output = NULL;
 	char *dumpfile = NULL;
+	char *extractfile = NULL;
 	struct fwheader header;
 	unsigned int current_offset = sizeof(struct fwheader);
 	int verbose = 0;
@@ -99,7 +139,7 @@ int main(int argc, char *argv[])
 
 	/* Analyze the options. We fill the "hwid" variable and the
 	   "parts" array. */
-	while ((opt = getopt(argc, argv, "hi:p:o:d:v")) != -1) {
+	while ((opt = getopt(argc, argv, "hi:p:o:d:x:v")) != -1) {
 		switch(opt) {
 		case 'h':
 			help();
@@ -122,6 +162,9 @@ int main(int argc, char *argv[])
 		case 'd':
 			dumpfile = strdup(optarg);
 			break;
+		case 'x':
+			extractfile = strdup(optarg);
+			break;
 		case 'v':
 			verbose = 1;
 			break;
@@ -131,8 +174,18 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	if (dumpfile && extractfile) {
+		fprintf(stderr, "Option -d and -x are mutually exclusive\n");
+		help();
+		exit(1);
+	}
+
 	if (dumpfile) {
-		return dodumpfile(dumpfile);
+		return dump_or_extract_file(dumpfile, MODE_DUMP);
+	}
+
+	if (extractfile) {
+		return dump_or_extract_file(extractfile, MODE_EXTRACT);
 	}
 
 	if (part_count == 0) {
