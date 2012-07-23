@@ -6,10 +6,24 @@ This software is composed of two applications :
  * fwupgrade-tool, which is an utility compiled for the host machine,
    that allows to generate and inspect a firmware image
 
- * fwupgrade-cgi, which is a cgi-bin executable, typically compiled
-   for the target machine, that receives the firmware image and
-   flashes the various parts of the firmware image in the right MTD
-   partitions and updates the U-Boot environment accordingly
+ * fwupgrade, which is an executable typically compiled for the target
+   and having two roles:
+
+   When called with just the name 'fwupgrade' and a file name as
+   argument, it triggers the firmware upgrade process using a locally
+   stored firmware image file.
+
+   When called with the name 'fwupgrade-cgi', it acts as a cgi-bin
+   executable, that receives the firmware image from HTTP and then
+   runs the firmware upgrade process.
+
+   In both cases, the firmware upgrade process will flash the various
+   parts of the firmware image in the right MTD partitions and will
+   update the U-Boot environment accordingly
+
+   Typically, the 'fwupgrade' program is installed in /usr/bin, and
+   for the CGI side, a symbolic link from for example
+   /var/www/cgi-bin/fwupgrade-cgi to /usr/bin/fwupgrade is used.
 
 The firmware image contains a set of "parts", each identified by a
 name. The fwupgrade-cgi program contains a configuration telling where
