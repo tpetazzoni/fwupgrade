@@ -235,58 +235,62 @@ int main(int argc, char *argv[])
 	unsigned int data_length;
 	int ret;
 	char *execname = basename(argv[0]);
+	int ascgi;
 
 	if (! execname) {
 		fprintf(stderr, "No executable name\n");
 		return -1;
 	}
 
-	if (! strcmp(execname, "fwupgrade")) {
-		ret = parse_configuration();
-		if (ret < 0) {
-			fprintf(stderr, "Problem parsing configuration\n");
+	if (! strcmp(execname, "fwupgrade"))
+		ascgi = 0;
+	else if (! strcmp(execname, "fwupgrade-cgi"))
+		ascgi = 1;
+	else {
+		fprintf(stderr, "Unknown executable name %s\n", execname);
+		return -1;
+	}
+
+	/* Switch to line-oriented buffering for stdout so that
+	 * messages are sent to the HTTP client right away */
+	setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
+
+	if (ascgi)
+		printf("Content-type: text/plain\n\n");
+
+	ret = parse_configuration();
+	if (ret < 0) {
+		fprintf(stderr, "Problem parsing configuration\n");
+		return -1;
+	}
+
+	if (ascgi) {
+		data = fwupgrade_cgi_receive_data(& data_length);
+		if (! data) {
+			printf("Failed to receive data\n");
 			return -1;
 		}
-
+	} else {
 		data = fwupgrade_load_file_data(argv[1], & data_length);
 		if (! data) {
 			fprintf(stderr, "Failed to load data\n");
 			return -1;
 		}
 	}
-	else if (! strcmp(execname, "fwupgrade-cgi")) {
-		/* Switch to line-oriented buffering for stdout so that
-		 * messages are sent to the HTTP client right away */
-		setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
-
-		printf("Content-type: text/plain\n\n");
-
-		ret = parse_configuration();
-		if (ret < 0) {
-			printf("Problem parsing configuration\n");
-			return -1;
-		}
-
-		data = fwupgrade_cgi_receive_data(& data_length);
-		if (! data) {
-			printf("Failed to receive data\n");
-			return -1;
-		}
-	}
-	else {
-		fprintf(stderr, "Unknown executable name %s\n", execname);
-		return -1;
-	}
 
 	ret = apply_upgrade(data, data_length);
 	if (ret) {
 		printf("The system upgrade failed\n");
-		close(STDOUT_FILENO);
+		if (ascgi)
+			close(STDOUT_FILENO);
 		return -1;
 	} else {
 		printf("The system upgrade completed successfully\n");
-		fflush(stdout);
-		close(STDOUT_FILENO);
+		if (ascgi) {
+			fflush(stdout);
+			close(STDOUT_FILENO);
+		}
+		sync();
 		sleep(1);
 		reboot(LINUX_REBOOT_CMD_RESTART);
 	}
