@@ -17,46 +17,46 @@
 
 struct fwupgrade_action {
 	const char *part_name;
-	const char *mtd_part1;
-	const char *mtd_part2;
+	const char *part1;
+	const char *part2;
 };
 
 struct fwupgrade_action actions[FWPART_COUNT];
 
-int flash_fwpart(const char *mtdpart, const char *data, unsigned int len)
+int flash_fwpart(const char *part, const char *data, unsigned int len)
 {
 	char cmd[1024];
 	int ret;
 	FILE *nandwrite_pipe;
 	size_t sz;
 
-	printf("Erasing partition %s\n", mtdpart);
+	printf("Erasing partition %s\n", part);
 
-	snprintf(cmd, sizeof(cmd), "flash_erase -q /dev/%s 0 0", mtdpart);
+	snprintf(cmd, sizeof(cmd), "flash_erase -q /dev/%s 0 0", part);
 	ret = system(cmd);
 	if (ret) {
-		printf("ERROR: Unable to erase partition %s, aborting.\n", mtdpart);
+		printf("ERROR: Unable to erase partition %s, aborting.\n", part);
 		return -1;
 	}
 
-	printf("Flashing partition %s\n", mtdpart);
+	printf("Flashing partition %s\n", part);
 
-	snprintf(cmd, sizeof(cmd), "nandwrite -q -p /dev/%s -", mtdpart);
+	snprintf(cmd, sizeof(cmd), "nandwrite -q -p /dev/%s -", part);
 	nandwrite_pipe = popen(cmd, "w");
 	if (! nandwrite_pipe) {
-		printf("ERROR: Unable to flash partition %s, aborting\n", mtdpart);
+		printf("ERROR: Unable to flash partition %s, aborting\n", part);
 		return -1;
 	}
 
 	sz = fwrite(data, len, 1, nandwrite_pipe);
 	if (sz != 1) {
-		printf("ERROR: Unable to flash partition %s, aborting\n", mtdpart);
+		printf("ERROR: Unable to flash partition %s, aborting\n", part);
 		return -1;
 	}
 
 	ret = pclose(nandwrite_pipe);
 	if (! WIFEXITED(ret) || WEXITSTATUS(ret) != 0) {
-		printf("ERROR: Unable to flash partition %s, aborting\n", mtdpart);
+		printf("ERROR: Unable to flash partition %s, aborting\n", part);
 		return -1;
 	}
 
@@ -66,7 +66,7 @@ int flash_fwpart(const char *mtdpart, const char *data, unsigned int len)
 int handle_fwpart(const char *partname, const char *data, unsigned int len)
 {
 	struct fwupgrade_action *act = NULL;
-	const char *current_mtdpart, *next_mtdpart;
+	const char *current_part, *next_part;
 	char uboot_varname[64];
 	int i, ret;
 
@@ -86,29 +86,30 @@ int handle_fwpart(const char *partname, const char *data, unsigned int len)
 	}
 
 	snprintf(uboot_varname, sizeof(uboot_varname), "%s_mtdpart", partname);
-	current_mtdpart = fw_env_read(uboot_varname);
-	if (! current_mtdpart) {
-		printf("ERROR: Cannot find current MTD partition for '%s', aborting.\n", partname);
+	current_part = fw_env_read(uboot_varname);
+	if (! current_part) {
+		printf("ERROR: Cannot find current partition for '%s', aborting.\n",
+		       partname);
 		return -1;
 	}
 
-	if (! strcmp(current_mtdpart, act->mtd_part1)) {
-		next_mtdpart = act->mtd_part2;
+	if (! strcmp(current_part, act->part1)) {
+		next_part = act->part2;
 	}
-	else if (! strcmp(current_mtdpart, act->mtd_part2)) {
-		next_mtdpart = act->mtd_part1;
+	else if (! strcmp(current_part, act->part2)) {
+		next_part = act->part1;
 	}
 	else {
-		printf("ERROR: Invalid current MTD partition '%s' for %s, aborting.\n",
-		       current_mtdpart, act->part_name);
+		printf("ERROR: Invalid current partition '%s' for %s, aborting.\n",
+		       current_part, act->part_name);
 		return -1;
 	}
 
-	ret = flash_fwpart(next_mtdpart, data, len);
+	ret = flash_fwpart(next_part, data, len);
 	if (ret)
 		return ret;
 
-	fw_env_write(uboot_varname, (char*) next_mtdpart);
+	fw_env_write(uboot_varname, (char*) next_part);
 
 	return 0;
 }
@@ -196,8 +197,8 @@ int parse_configuration(void)
 	while (fgets(line, sizeof(line), cfg)) {
 		char *tmp, *cur;
 		enum { FIELD_PART_NAME,
-		       FIELD_MTD_PART1,
-		       FIELD_MTD_PART2 } field = FIELD_PART_NAME;
+		       FIELD_PART1,
+		       FIELD_PART2 } field = FIELD_PART_NAME;
 
 		if (action >= FWPART_COUNT) {
 			fclose(cfg);
@@ -213,10 +214,10 @@ int parse_configuration(void)
 		while((cur = strtok(tmp, ":")) != NULL) {
 			if (field == FIELD_PART_NAME)
 				actions[action].part_name = strdup(cur);
-			else if (field == FIELD_MTD_PART1)
-				actions[action].mtd_part1 = strdup(cur);
-			else if (field == FIELD_MTD_PART2)
-				actions[action].mtd_part2 = strdup(cur);
+			else if (field == FIELD_PART1)
+				actions[action].part1 = strdup(cur);
+			else if (field == FIELD_PART2)
+				actions[action].part2 = strdup(cur);
 			field++;
 			tmp = NULL;
 		}
