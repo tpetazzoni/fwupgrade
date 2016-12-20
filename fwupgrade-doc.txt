@@ -18,8 +18,8 @@ This software is composed of two applications :
    runs the firmware upgrade process.
 
    In both cases, the firmware upgrade process will flash the various
-   parts of the firmware image in the right MTD partitions and will
-   update the U-Boot environment accordingly
+   parts of the firmware image in the right MTD partitions/UBIFS volumes
+   and will update the U-Boot environment accordingly
 
    Typically, the 'fwupgrade' program is installed in /usr/bin, and
    for the CGI side, a symbolic link from for example
@@ -27,12 +27,14 @@ This software is composed of two applications :
 
 The firmware image contains a set of "parts", each identified by a
 name. The fwupgrade-cgi program contains a configuration telling where
-a given part should be flashed. For each part, two MTD partitions are
-specified, so that the updates are not done by overwriting the
-currently running kernel or the currently mounted filesystems. The
-fwupgrade-cgi looks at the U-Boot environment for variables named
-<partname>_mtdpart to know where the current version of the part is
-being stored.
+a given part should be flashed. For each part, two MTD partitions (or
+UBIFS volumes) are specified, so that the updates are not done by
+overwriting the currently running kernel or the currently mounted
+filesystems. The fwupgrade-cgi looks at the U-Boot environment for
+variables named <partname>_mtdpart (or <partname>_ubivol) to know where
+the current version of the part is being stored.
+
+** Example for MTD partitions **
 
 For exemple, if a part is named "rootfs" and the fwupgrade-cgi program
 has the configuration that the "rootfs" part is on mtd2 or mtd3, then:
@@ -48,6 +50,17 @@ has the configuration that the "rootfs" part is on mtd2 or mtd3, then:
 Of course, the U-Boot environnement is supposed to be configured so
 that the rootfs_mtdpart is used to tell the kernel where the current
 root filesystem is.
+
+** Example for UBIFS volumes **
+
+In case of a UBI/UBIFS system, the fwupgrade tool will update UBIFS
+volumes. In that case, it follows the same description than above with
+some differences:
+ * You will specify a volume name and not a MTD partition name
+ * Your volume names must not contain 'mtd' as this flag is used to
+ detect if it is a MTD or UBI partitions.
+ * The u-boot environment variable is no more "rootfs_mtdpart" but
+ "rootfs_ubivol".
 
 Firmware image file format
 ==========================
