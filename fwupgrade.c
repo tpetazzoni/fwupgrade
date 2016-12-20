@@ -19,29 +19,39 @@ struct fwupgrade_action {
 	const char *part_name;
 	const char *part1;
 	const char *part2;
+	int is_mtd;
 };
 
 struct fwupgrade_action actions[FWPART_COUNT];
 
-int flash_fwpart(const char *part, const char *data, unsigned int len)
+int flash_fwpart(const char *part, const char *data, unsigned int len,
+		 int is_mtd)
 {
 	char cmd[1024];
 	int ret;
 	FILE *nandwrite_pipe;
 	size_t sz;
 
-	printf("Erasing partition %s\n", part);
+	if (is_mtd) {
+		printf("Erasing partition %s\n", part);
 
-	snprintf(cmd, sizeof(cmd), "flash_erase -q /dev/%s 0 0", part);
-	ret = system(cmd);
-	if (ret) {
-		printf("ERROR: Unable to erase partition %s, aborting.\n", part);
-		return -1;
+		snprintf(cmd, sizeof(cmd), "flash_erase -q /dev/%s 0 0", part);
+		ret = system(cmd);
+		if (ret) {
+			printf("ERROR: Unable to erase partition %s, aborting.\n", part);
+			return -1;
+		}
+
+		printf("Flashing partition %s\n", part);
+
+		snprintf(cmd, sizeof(cmd), "nandwrite -q -p /dev/%s -", part);
+	} else {
+		printf("Flashing partition %s\n", part);
+
+		snprintf(cmd, sizeof(cmd), "ubiupdatevol /dev/ubi/%s --size=%d -",
+			 part, len);
 	}
 
-	printf("Flashing partition %s\n", part);
-
-	snprintf(cmd, sizeof(cmd), "nandwrite -q -p /dev/%s -", part);
 	nandwrite_pipe = popen(cmd, "w");
 	if (! nandwrite_pipe) {
 		printf("ERROR: Unable to flash partition %s, aborting\n", part);
@@ -85,7 +95,15 @@ int handle_fwpart(const char *partname, const char *data, unsigned int len)
 		return -1;
 	}
 
-	snprintf(uboot_varname, sizeof(uboot_varname), "%s_mtdpart", partname);
+	/* The u-boot variable is different according to MTD/UBI */
+	if (! act->is_mtd) {
+		snprintf(uboot_varname, sizeof(uboot_varname), "%s_ubivol",
+			 partname);
+	} else {
+		snprintf(uboot_varname, sizeof(uboot_varname), "%s_mtdpart",
+			 partname);
+	}
+
 	current_part = fw_env_read(uboot_varname);
 	if (! current_part) {
 		printf("ERROR: Cannot find current partition for '%s', aborting.\n",
@@ -105,7 +123,7 @@ int handle_fwpart(const char *partname, const char *data, unsigned int len)
 		return -1;
 	}
 
-	ret = flash_fwpart(next_part, data, len);
+	ret = flash_fwpart(next_part, data, len, act->is_mtd);
 	if (ret)
 		return ret;
 
@@ -214,9 +232,14 @@ int parse_configuration(void)
 		while((cur = strtok(tmp, ":")) != NULL) {
 			if (field == FIELD_PART_NAME)
 				actions[action].part_name = strdup(cur);
-			else if (field == FIELD_PART1)
+			else if (field == FIELD_PART1) {
 				actions[action].part1 = strdup(cur);
-			else if (field == FIELD_PART2)
+				if (strstr(cur, "mtd") != NULL) {
+					actions[action].is_mtd = 1;
+				} else {
+					actions[action].is_mtd = 0;
+				}
+			} else if (field == FIELD_PART2)
 				actions[action].part2 = strdup(cur);
 			field++;
 			tmp = NULL;
