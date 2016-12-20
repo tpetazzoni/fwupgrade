@@ -19,42 +19,52 @@ struct fwupgrade_action {
 	const char *part_name;
 	const char *part1;
 	const char *part2;
+	enum { TYPE_MTD, TYPE_UBI } type;
 };
 
 struct fwupgrade_action actions[FWPART_COUNT];
 
-int flash_fwpart(const char *part, const char *data, unsigned int len)
+int flash_fwpart(const char *part, const char *data, unsigned int len,
+		 int type)
 {
 	char cmd[1024];
 	int ret;
-	FILE *nandwrite_pipe;
+	FILE *flash_pipe;
 	size_t sz;
 
-	printf("Erasing partition %s\n", part);
+	if (type == TYPE_MTD) {
+		printf("Erasing partition %s\n", part);
 
-	snprintf(cmd, sizeof(cmd), "flash_erase -q /dev/%s 0 0", part);
-	ret = system(cmd);
-	if (ret) {
-		printf("ERROR: Unable to erase partition %s, aborting.\n", part);
-		return -1;
+		snprintf(cmd, sizeof(cmd), "flash_erase -q /dev/%s 0 0", part);
+		ret = system(cmd);
+		if (ret) {
+			printf("ERROR: Unable to erase partition %s, aborting.\n", part);
+			return -1;
+		}
+
+		printf("Flashing partition %s\n", part);
+
+		snprintf(cmd, sizeof(cmd), "nandwrite -q -p /dev/%s -", part);
+	} else {
+		printf("Flashing partition %s\n", part);
+
+		snprintf(cmd, sizeof(cmd), "ubiupdatevol /dev/ubi/%s --size=%d -",
+			 part, len);
 	}
 
-	printf("Flashing partition %s\n", part);
-
-	snprintf(cmd, sizeof(cmd), "nandwrite -q -p /dev/%s -", part);
-	nandwrite_pipe = popen(cmd, "w");
-	if (! nandwrite_pipe) {
+	flash_pipe = popen(cmd, "w");
+	if (! flash_pipe) {
 		printf("ERROR: Unable to flash partition %s, aborting\n", part);
 		return -1;
 	}
 
-	sz = fwrite(data, len, 1, nandwrite_pipe);
+	sz = fwrite(data, len, 1, flash_pipe);
 	if (sz != 1) {
 		printf("ERROR: Unable to flash partition %s, aborting\n", part);
 		return -1;
 	}
 
-	ret = pclose(nandwrite_pipe);
+	ret = pclose(flash_pipe);
 	if (! WIFEXITED(ret) || WEXITSTATUS(ret) != 0) {
 		printf("ERROR: Unable to flash partition %s, aborting\n", part);
 		return -1;
@@ -85,7 +95,15 @@ int handle_fwpart(const char *partname, const char *data, unsigned int len)
 		return -1;
 	}
 
-	snprintf(uboot_varname, sizeof(uboot_varname), "%s_mtdpart", partname);
+	/* The u-boot variable is different according to MTD/UBI */
+	if (act->type == TYPE_UBI) {
+		snprintf(uboot_varname, sizeof(uboot_varname), "%s_ubivol",
+			 partname);
+	} else {
+		snprintf(uboot_varname, sizeof(uboot_varname), "%s_mtdpart",
+			 partname);
+	}
+
 	current_part = fw_env_read(uboot_varname);
 	if (! current_part) {
 		printf("ERROR: Cannot find current partition for '%s', aborting.\n",
@@ -105,7 +123,7 @@ int handle_fwpart(const char *partname, const char *data, unsigned int len)
 		return -1;
 	}
 
-	ret = flash_fwpart(next_part, data, len);
+	ret = flash_fwpart(next_part, data, len, act->type);
 	if (ret)
 		return ret;
 
@@ -198,18 +216,23 @@ int parse_configuration(void)
 		char *tmp, *cur;
 		enum { FIELD_PART_NAME,
 		       FIELD_PART1,
-		       FIELD_PART2 } field = FIELD_PART_NAME;
+		       FIELD_PART2,
+		       FIELD_TYPE} field = FIELD_PART_NAME;
 
 		if (action >= FWPART_COUNT) {
 			fclose(cfg);
 			return -1;
 		}
 
+		/* In case the partition type is not defined, assume
+		 * MTD by default, for backward compatibility */
+		actions[action].type = TYPE_MTD;
+
 		/* Remove ending newline if any */
 		if (line[strlen(line)-1] == '\n')
 			line[strlen(line)-1] = '\0';
 
-		/* Split the three ':' separated fields */
+		/* Split the four ':' separated fields */
 		tmp = line;
 		while((cur = strtok(tmp, ":")) != NULL) {
 			if (field == FIELD_PART_NAME)
@@ -218,6 +241,12 @@ int parse_configuration(void)
 				actions[action].part1 = strdup(cur);
 			else if (field == FIELD_PART2)
 				actions[action].part2 = strdup(cur);
+			else if (field == FIELD_TYPE) {
+				if (!strcmp(cur, "ubi"))
+					actions[action].type = TYPE_UBI;
+				else
+					actions[action].type = TYPE_MTD;
+			}
 			field++;
 			tmp = NULL;
 		}
