@@ -34,9 +34,9 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <stdint.h>
 
 #ifdef MTD_OLD
-# include <stdint.h>
 # include <linux/mtd/mtd.h>
 #else
 # define  __user	/* nothing */
