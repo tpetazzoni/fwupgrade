@@ -12,7 +12,11 @@
 #include <endian.h>
 #include <sys/types.h>
 
-#define tole(x) htole32(x)
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+#define tole(x) (x)
+#else
+#define tole(x) __bswap_constant_32(x)
+#endif
 
 #ifdef DYNAMIC_CRC_TABLE
 
