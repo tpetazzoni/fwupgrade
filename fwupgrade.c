@@ -17,8 +17,10 @@
 
 struct fwupgrade_action {
 	const char *part_name;
-	const char *part1;
-	const char *part2;
+	const char *uboot_part1;
+	const char *uboot_part2;
+	const char *kernel_part1;
+	const char *kernel_part2;
 	enum { TYPE_MTD, TYPE_UBI } type;
 };
 
@@ -76,7 +78,7 @@ int flash_fwpart(const char *part, const char *data, unsigned int len,
 int handle_fwpart(const char *partname, const char *data, unsigned int len)
 {
 	struct fwupgrade_action *act = NULL;
-	const char *current_part, *next_part;
+	const char *current_part, *next_kernel_part, *next_uboot_part;
 	char uboot_varname[64];
 	int i, ret;
 
@@ -111,11 +113,13 @@ int handle_fwpart(const char *partname, const char *data, unsigned int len)
 		return -1;
 	}
 
-	if (! strcmp(current_part, act->part1)) {
-		next_part = act->part2;
+	if (! strcmp(current_part, act->uboot_part1)) {
+		next_kernel_part = act->kernel_part2;
+		next_uboot_part = act->uboot_part2;
 	}
-	else if (! strcmp(current_part, act->part2)) {
-		next_part = act->part1;
+	else if (! strcmp(current_part, act->uboot_part2)) {
+		next_kernel_part = act->kernel_part1;
+		next_uboot_part = act->uboot_part1;
 	}
 	else {
 		printf("ERROR: Invalid current partition '%s' for %s, aborting.\n",
@@ -123,11 +127,11 @@ int handle_fwpart(const char *partname, const char *data, unsigned int len)
 		return -1;
 	}
 
-	ret = flash_fwpart(next_part, data, len, act->type);
+	ret = flash_fwpart(next_kernel_part, data, len, act->type);
 	if (ret)
 		return ret;
 
-	fw_env_write(uboot_varname, (char*) next_part);
+	fw_env_write(uboot_varname, (char*) next_uboot_part);
 
 	return 0;
 }
@@ -215,8 +219,10 @@ int parse_configuration(void)
 	while (fgets(line, sizeof(line), cfg)) {
 		char *tmp, *cur;
 		enum { FIELD_PART_NAME,
-		       FIELD_PART1,
-		       FIELD_PART2,
+		       FIELD_UBOOT_PART1,
+		       FIELD_UBOOT_PART2,
+		       FIELD_KERNEL_PART1,
+		       FIELD_KERNEL_PART2,
 		       FIELD_TYPE} field = FIELD_PART_NAME;
 
 		if (action >= FWPART_COUNT) {
@@ -237,10 +243,14 @@ int parse_configuration(void)
 		while((cur = strtok(tmp, ":")) != NULL) {
 			if (field == FIELD_PART_NAME)
 				actions[action].part_name = strdup(cur);
-			else if (field == FIELD_PART1)
-				actions[action].part1 = strdup(cur);
-			else if (field == FIELD_PART2)
-				actions[action].part2 = strdup(cur);
+			else if (field == FIELD_UBOOT_PART1)
+				actions[action].uboot_part1 = strdup(cur);
+			else if (field == FIELD_UBOOT_PART2)
+				actions[action].uboot_part2 = strdup(cur);
+			else if (field == FIELD_KERNEL_PART1)
+				actions[action].kernel_part1 = strdup(cur);
+			else if (field == FIELD_KERNEL_PART2)
+				actions[action].kernel_part2 = strdup(cur);
 			else if (field == FIELD_TYPE) {
 				if (!strcmp(cur, "ubi"))
 					actions[action].type = TYPE_UBI;
